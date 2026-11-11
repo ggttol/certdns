@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CertDNS · 证书与多云 DNS 管理中心</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="modulepreload" href="/assets/state.js">
+  <link rel="modulepreload" href="/assets/api.js">
+  <link rel="modulepreload" href="/assets/ui.js">
+  <link rel="modulepreload" href="/assets/certs.js">
+  <link rel="modulepreload" href="/assets/dns.js">
+  <link rel="modulepreload" href="/assets/accounts.js">
+  <link rel="modulepreload" href="/assets/system.js">
+  <link rel="modulepreload" href="/assets/jobs.js">
+</head>
+<body>
+  <div id="boot" class="boot-screen" role="status">
+    <div class="boot-spinner"></div>
+    <span>正在连接管理中心…</span>
+  </div>
+
+  <!-- 登录视图 -->
+  <section id="login-view" class="login-layout" hidden>
+    <div class="login-brand-pane">
+      <div class="brand-logo">
+        <span class="brand-icon">◆</span>
+        <span class="brand-title">CertDNS</span>
+      </div>
+      <div class="brand-hero">
+        <span class="pill-tag">ACME DNS-01 · 多阿里云账户 (中国站 &amp; 国际站) · Pull API</span>
+        <h1>自动化 TLS 证书与<br>多云域名解析控制台</h1>
+        <p>单二进制内嵌 ACME 签发引擎与续期调度，支持多阿里云账户协同签发、AES-256-GCM 凭据静态加密、远程节点最小权限拉取与全链路安全审计。</p>
+      </div>
+      <div class="brand-footer">安全加固 · 零外部构建依赖 · 多角色权限管控</div>
+    </div>
+    <div class="login-form-pane">
+      <form id="login-form" class="login-card">
+        <h2>登录管理控制台</h2>
+        <p class="muted">请输入账号与密码以访问证书、私钥与 DNS 解析配置。</p>
+        <div class="stack-form">
+          <div>
+            <label for="login-username">用户名</label>
+            <input id="login-username" name="username" type="text" value="admin" autocomplete="username" placeholder="留空默认使用 admin">
+          </div>
+          <div>
+            <label for="login-password">登录密码</label>
+            <input id="login-password" name="password" type="password" autocomplete="current-password" required autofocus placeholder="输入登录密码">
+          </div>
+          <p id="login-error" class="error-banner" role="alert" hidden></p>
+          <button type="submit" class="btn btn-primary btn-block">安全登录 →</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- 主工作台视图：深色侧栏 + 浅色主工作区 -->
+  <div id="app-view" class="app-shell" hidden>
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <div class="sidebar-brand">
+          <span class="brand-icon">◆</span>
+          <div class="sidebar-brand-text">
+            <span class="brand-title">CertDNS</span>
+            <span class="sidebar-sub">TLS &amp; Multi-Cloud DNS</span>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="主导航">
+          <button type="button" class="nav-item active" data-tab="certs">
+            <span class="nav-item-label">TLS 证书管理</span>
+            <span id="nav-cert-badge" class="nav-pill tabular-nums">0</span>
+          </button>
+          <button type="button" class="nav-item" data-tab="dns">
+            <span class="nav-item-label">DNS 解析管理</span>
+          </button>
+          <button type="button" class="nav-item" data-tab="accounts">
+            <span class="nav-item-label">阿里云账户</span>
+            <span id="nav-acct-badge" class="nav-pill tabular-nums">0</span>
+          </button>
+          <button type="button" class="nav-item" data-tab="jobs">
+            <span class="nav-item-label">任务队列</span>
+            <span id="nav-job-badge" class="nav-badge tabular-nums" hidden>0</span>
+          </button>
+          <button type="button" class="nav-item" data-tab="system">
+            <span class="nav-item-label">系统与安全</span>
+            <span id="nav-sys-badge" class="nav-pill tabular-nums" hidden>0</span>
+          </button>
+        </nav>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-user">
+          <div class="sidebar-user-info">
+            <strong id="sidebar-user-name" class="sidebar-user-name">—</strong>
+            <span id="sidebar-user-role" class="sidebar-user-role">—</span>
+          </div>
+          <button id="logout-btn" type="button" class="btn btn-sidebar-ghost btn-sm">退出</button>
+        </div>
+        <div id="host-badge" class="host-pill" title="当前管理入口域名"></div>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="workspace-header">
+        <div class="workspace-title-wrap">
+          <h1 id="view-title">TLS 证书管理</h1>
+          <p id="view-desc" class="workspace-desc">管理 ACME 自动签发与外部导入证书，支持多格式证书包下载、在线复制 PEM 与到期自动续期。</p>
+        </div>
+      </header>
+
+      <main class="workspace-body">
+        <!-- VIEW 1: TLS 证书管理 -->
+        <section id="tab-certs" class="tab-pane">
+          <section class="stats-grid" aria-label="证书指标概览">
+            <div class="stat-card">
+              <span class="stat-label">托管证书总数</span>
+              <strong id="stat-total" class="stat-value tabular-nums">0</strong>
+              <small class="stat-sub">ACME 签发与外部导入</small>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">正常有效</span>
+              <strong id="stat-valid" class="stat-value text-green tabular-nums">0</strong>
+              <small class="stat-sub">有效期内且状态正常</small>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">即将到期 (≤30天)</span>
+              <strong id="stat-expiring" class="stat-value text-amber tabular-nums">0</strong>
+              <small class="stat-sub">调度器到期前自动续期</small>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">已过期或异常</span>
+              <strong id="stat-abnormal" class="stat-value text-red tabular-nums">0</strong>
+              <small class="stat-sub">已过期或签发续期失败</small>
+            </div>
+          </section>
+
+          <div class="pane-grid">
+            <div class="pane-main">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <h2>已托管证书</h2>
+                    <p class="muted">支持 Nginx / Apache / 全量 ZIP 下载、PEM 一键复制、配置修改与跨阿里云账户续期。</p>
+                  </div>
+                  <button id="refresh-certs" type="button" class="btn btn-secondary btn-sm">刷新列表</button>
+                </div>
+
+                <div class="filter-bar">
+                  <input type="search" id="cert-search" class="search-input" placeholder="搜索域名、备注、颁发机构或 ID…">
+                  <select id="cert-status-filter" class="select-input select-sm" aria-label="状态筛选">
+                    <option value="">全部状态</option>
+                    <option value="valid">正常有效</option>
+                    <option value="expiring">即将到期 (≤30天)</option>
+                    <option value="abnormal">已过期或异常</option>
+                    <option value="pending">排队 / 执行中</option>
+                  </select>
+                  <select id="cert-account-filter" class="select-input select-sm" aria-label="阿里云账户筛选">
+                    <option value="">全部阿里云账户</option>
+                  </select>
+                </div>
+
+                <div id="certs-list" class="certs-list"></div>
+              </div>
+            </div>
+
+            <aside class="pane-side">
+              <div id="cert-side-card" class="card">
+                <div class="subtab-bar">
+                  <button type="button" class="subtab-btn active" data-cert-mode="acme">ACME 自动签发</button>
+                  <button type="button" class="subtab-btn" data-cert-mode="upload">上传已有证书</button>
+                </div>
+
+                <!-- 模式 A: ACME 自动签发 -->
+                <form id="issue-form" class="stack-form">
+                  <div>
+                    <label for="issue-account">DNS 验证阿里云账户</label>
+                    <select id="issue-account" class="select-input">
+                      <option value="">自动匹配域名所属阿里云账户 (支持跨账户合并签发)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <div class="label-row">
+                      <label>快速选择托管域名</label>
+                      <button type="button" id="load-zones-btn" class="link-btn">同步全部账户域名</button>
+                    </div>
+                    <div id="quick-zones" class="chip-group">
+                      <span class="muted small">点击上方“同步全部账户域名”或直接输入域名</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label for="issue-domains">证书包含域名 (每行或逗号分隔)</label>
+                    <textarea id="issue-domains" rows="3" placeholder="例如：&#10;example.com&#10;*.example.com" required></textarea>
+                    <p class="help-text">泛域名 <code>*.example.com</code> 不含根域名 <code>example.com</code>，建议同时添加。</p>
+                  </div>
+
+                  <div class="form-grid-2">
+                    <div>
+                      <label for="issue-key-type">密钥算法</label>
+                      <select id="issue-key-type" class="select-input">
+                        <option value="EC256">ECDSA P-256 (默认推荐)</option>
+                        <option value="EC384">ECDSA P-384</option>
+                        <option value="RSA2048">RSA 2048</option>
+                        <option value="RSA4096">RSA 4096</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label for="issue-remark">备注标签 (选填)</label>
+                      <input type="text" id="issue-remark" placeholder="如：生产主站 / CDN">
+                    </div>
+                  </div>
+
+                  <div class="checkbox-row">
+                    <input type="checkbox" id="issue-staging">
+                    <label for="issue-staging">使用 Let's Encrypt 测试环境 (Staging，不受浏览器信任)</label>
+                  </div>
+
+                  <div class="checkbox-row">
+                    <input type="checkbox" id="issue-autorenew" checked>
+                    <label for="issue-autorenew">开启到期前 30 天自动续期</label>
+                  </div>
+
+                  <div class="checkbox-row">
+                    <input type="checkbox" id="issue-tos" required>
+                    <label for="issue-tos">我已阅读并同意 <a href="https://letsencrypt.org/repository/" target="_blank" rel="noopener noreferrer">Let's Encrypt 服务条款</a></label>
+                  </div>
+
+                  <button type="submit" class="btn btn-primary btn-block">提交签发任务</button>
+                </form>
+
+                <!-- 模式 B: 上传已有证书 -->
+                <form id="upload-form" class="stack-form" hidden>
+                  <p class="muted small">导入外部签发的 PEM 证书与私钥，系统会自动校验公私钥配对、有效期并提取覆盖域名。</p>
+                  <div>
+                    <label for="upload-fullchain">证书内容 (fullchain.pem / PEM 格式)</label>
+                    <textarea id="upload-fullchain" class="mono-textarea" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;..." required></textarea>
+                  </div>
+                  <div>
+                    <label for="upload-privkey">私钥内容 (privkey.pem / PEM 格式)</label>
+                    <textarea id="upload-privkey" class="mono-textarea" rows="4" placeholder="-----BEGIN PRIVATE KEY-----&#10;..." required></textarea>
+                  </div>
+                  <div>
+                    <label for="upload-remark">备注标签 (选填)</label>
+                    <input type="text" id="upload-remark" placeholder="如：商业证书导入">
+                  </div>
+                  <button type="submit" class="btn btn-primary btn-block">校验并导入证书</button>
+                </form>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <!-- VIEW 2: DNS 解析管理 -->
+        <section id="tab-dns" class="tab-pane" hidden>
+          <div class="card">
+            <div class="card-header dns-header">
+              <div class="dns-zone-bar">
+                <label for="dns-account-filter">账户筛选</label>
+                <select id="dns-account-filter" class="select-input select-sm">
+                  <option value="">全部阿里云账户</option>
+                </select>
+                <label for="dns-zone-select">托管主域名</label>
+                <select id="dns-zone-select" class="select-input select-md"></select>
+                <button type="button" id="dns-refresh-zones" class="btn btn-secondary btn-sm">同步域名</button>
+                <button type="button" id="dns-add-zone-toggle" class="btn btn-ghost btn-sm">＋ 接入新域名</button>
+              </div>
+              <div class="dns-filter-bar">
+                <select id="dns-type-filter" class="select-input select-sm" aria-label="记录类型筛选">
+                  <option value="">全部类型</option>
+                  <option value="A">A</option>
+                  <option value="AAAA">AAAA</option>
+                  <option value="CNAME">CNAME</option>
+                  <option value="TXT">TXT</option>
+                  <option value="MX">MX</option>
+                  <option value="SRV">SRV</option>
+                  <option value="CAA">CAA</option>
+                  <option value="NS">NS</option>
+                </select>
+                <input type="search" id="dns-keyword" class="search-input" placeholder="搜索主机记录或记录值…">
+                <button type="button" id="dns-search-btn" class="btn btn-secondary btn-sm">查询</button>
+                <button type="button" id="dns-export-btn" class="btn btn-secondary btn-sm" title="导出标准 BIND Zone 文件">导出 Zone</button>
+                <button type="button" id="dns-new-record-btn" class="btn btn-primary btn-sm">＋ 新增记录</button>
+              </div>
+            </div>
+
+            <!-- 接入新域名折叠框 -->
+            <form id="dns-add-zone-form" class="subpanel" hidden>
+              <div class="subpanel-row">
+                <select id="new-zone-account" class="select-input select-md" aria-label="目标阿里云账户"></select>
+                <input type="text" id="new-zone-input" placeholder="输入要接入阿里云 DNS 托管的主域名，如 example.com" required>
+                <button type="submit" class="btn btn-primary btn-sm">确认接入</button>
+                <button type="button" id="dns-add-zone-cancel" class="btn btn-ghost btn-sm">取消</button>
+              </div>
+              <p class="help-text">支持选择接入到指定的阿里云中国站或国际站账户；接入后请前往域名注册商处修改 NS 服务器。</p>
+              <div id="new-zone-result" class="ns-highlight" hidden></div>
+            </form>
+
+            <!-- 新增/编辑记录折叠框 -->
+            <form id="dns-record-form" class="subpanel" hidden>
+              <h3 id="dns-form-title">新增解析记录</h3>
+              <input type="hidden" id="dns-record-id">
+              <div class="form-grid-6">
+                <div>
+                  <label for="dns-rr">主机记录 (RR)</label>
+                  <input type="text" id="dns-rr" placeholder="@ 或 www 或 cert" required>
+                </div>
+                <div>
+                  <label for="dns-type">记录类型</label>
+                  <select id="dns-type" class="select-input">
+                    <option value="A">A — IPv4</option>
+                    <option value="AAAA">AAAA — IPv6</option>
+                    <option value="CNAME">CNAME — 别名</option>
+                    <option value="TXT">TXT — 文本</option>
+                    <option value="MX">MX — 邮件</option>
+                    <option value="CAA">CAA — 授权</option>
+                    <option value="SRV">SRV — 服务</option>
+                    <option value="NS">NS — 域名服务器</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="dns-value">记录值</label>
+                  <input type="text" id="dns-value" placeholder="如 203.0.113.10" required>
+                </div>
+                <div>
+                  <label for="dns-ttl">TTL (秒)</label>
+                  <input type="number" id="dns-ttl" value="600" min="1" max="86400" required>
+                </div>
+                <div id="dns-priority-wrap" hidden>
+                  <label for="dns-priority">MX 优先级</label>
+                  <input type="number" id="dns-priority" value="10" min="1" max="50">
+                </div>
+                <div>
+                  <label for="dns-remark">备注 (选填)</label>
+                  <input type="text" id="dns-remark" maxlength="100" placeholder="用途说明 (≤100字)">
+                </div>
+              </div>
+              <div class="subpanel-actions">
+                <span class="help-text">根域名请填 <code>@</code>；免费版阿里云 DNS 最小 TTL 为 600 秒。</span>
+                <div class="btn-row">
+                  <button type="button" id="dns-form-cancel" class="btn btn-ghost btn-sm">取消</button>
+                  <button type="submit" class="btn btn-primary btn-sm">保存记录</button>
+                </div>
+              </div>
+            </form>
+
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>主机记录</th>
+                    <th>类型</th>
+                    <th>记录值 (点击复制)</th>
+                    <th>TTL</th>
+                    <th>状态 / 备注</th>
+                    <th class="text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="dns-records-body">
+                  <tr><td colspan="6" class="empty-cell">正在加载域名与解析记录…</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="dns-pagination" class="pagination-bar"></div>
+          </div>
+        </section>
+
+        <!-- VIEW 3: 多阿里云账户管理 -->
+        <section id="tab-accounts" class="tab-pane" hidden>
+          <div class="pane-grid">
+            <div class="pane-main">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <h2>已配置的阿里云 DNS 账户</h2>
+                    <p class="muted">支持同时托管多个阿里云中国站 (<code>alidns.aliyuncs.com</code>) 与国际站 (<code>alidns.ap-southeast-1.aliyuncs.com</code>) 账户。</p>
+                  </div>
+                  <button type="button" id="sync-all-accounts-btn" class="btn btn-secondary btn-sm">同步所有账户域名</button>
+                </div>
+                <div id="accounts-list" class="certs-list"></div>
+              </div>
+            </div>
+
+            <aside class="pane-side">
+              <div id="account-side-card" class="card">
+                <div class="card-header">
+                  <div>
+                    <h2 id="account-form-title">新增阿里云账户</h2>
+                    <p class="muted">AccessKey Secret 使用 AES-256-GCM 静态加密存储，不在前端回显。</p>
+                  </div>
+                  <button type="button" id="account-form-reset" class="btn btn-ghost btn-sm" hidden>取消编辑</button>
+                </div>
+                <form id="account-form" class="stack-form">
+                  <input type="hidden" id="acct-id">
+                  <div>
+                    <label for="acct-name">账户名称 / 标识</label>
+                    <input type="text" id="acct-name" placeholder="例如：阿里云中国主账号 / 国际站 SG" required>
+                  </div>
+                  <div>
+                    <label for="acct-edition">阿里云站点版本</label>
+                    <select id="acct-edition" class="select-input">
+                      <option value="cn">阿里云中国站 (alidns.aliyuncs.com · cn-hangzhou)</option>
+                      <option value="intl">阿里云国际站 International (alidns.ap-southeast-1.aliyuncs.com)</option>
+                      <option value="custom">自定义接入点 / 专属地域 (Custom Endpoint &amp; Region)</option>
+                    </select>
+                  </div>
+                  <div id="acct-custom-wrap" class="form-grid-2" hidden>
+                    <div>
+                      <label for="acct-region">Region ID</label>
+                      <input type="text" id="acct-region" placeholder="如 ap-southeast-1 或 cn-hongkong">
+                    </div>
+                    <div>
+                      <label for="acct-endpoint">API Endpoint</label>
+                      <input type="text" id="acct-endpoint" placeholder="https://alidns.ap-southeast-1.aliyuncs.com/">
+                    </div>
+                  </div>
+                  <div>
+                    <label for="acct-key-id">AccessKey ID</label>
+                    <input type="text" id="acct-key-id" autocomplete="off" spellcheck="false" placeholder="输入 AccessKey ID" required>
+                  </div>
+                  <div>
+                    <label for="acct-key-secret">AccessKey Secret <span id="acct-secret-hint" class="muted small">(必填)</span></label>
+                    <input type="password" id="acct-key-secret" autocomplete="new-password" placeholder="输入 AccessKey Secret">
+                  </div>
+                  <div>
+                    <label for="acct-email">关联 ACME 联系邮箱 (选填)</label>
+                    <input type="email" id="acct-email" placeholder="ops@example.com">
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" id="acct-default">
+                    <label for="acct-default">设为默认阿里云 DNS 账户</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" id="acct-enabled" checked>
+                    <label for="acct-enabled">启用该账户参与域名解析与 ACME 验证</label>
+                  </div>
+                  <button type="submit" class="btn btn-primary btn-block">保存阿里云账户</button>
+                </form>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <!-- VIEW 4: 任务队列 -->
+        <section id="tab-jobs" class="tab-pane" hidden>
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>签发与续期任务队列</h2>
+                <p class="muted">所有 ACME 挑战与证书申请操作均由后台队列串行执行，点击任务可实时跟踪输出日志。</p>
+              </div>
+              <button type="button" id="refresh-jobs" class="btn btn-secondary btn-sm">刷新队列</button>
+            </div>
+            <div id="jobs-list" class="jobs-list"></div>
+          </div>
+        </section>
+
+        <!-- VIEW 5: 系统与安全 -->
+        <section id="tab-system" class="tab-pane" hidden>
+          <div class="sys-tab-bar" role="tablist" aria-label="系统与安全子导航">
+            <button type="button" class="sys-tab-btn active" data-sys-tab="users">用户与权限</button>
+            <button type="button" class="sys-tab-btn" data-sys-tab="tokens">拉取令牌 (Pull API)</button>
+            <button type="button" class="sys-tab-btn" data-sys-tab="audit">安全审计日志</button>
+            <button type="button" class="sys-tab-btn" data-sys-tab="profile">个人密码与通知</button>
+          </div>
+
+          <!-- 子面板 1: 用户与权限 (仅管理员可见) -->
+          <div id="sys-users" class="sys-panel">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <h2>系统用户与权限管理</h2>
+                  <p class="muted">支持多角色权限隔离：<strong>系统管理员 (admin)</strong>、<strong>运维操作员 (operator)</strong>、<strong>只读审计员 (viewer)</strong>。</p>
+                </div>
+                <button type="button" id="new-user-btn" class="btn btn-primary btn-sm">＋ 新增用户</button>
+              </div>
+
+              <form id="user-form" class="subpanel" hidden>
+                <h3 id="user-form-title">新增系统用户</h3>
+                <input type="hidden" id="user-edit-id">
+                <div class="form-grid-4">
+                  <div>
+                    <label for="user-username">登录用户名</label>
+                    <input type="text" id="user-username" placeholder="如 ops_zhang" required>
+                  </div>
+                  <div>
+                    <label for="user-display">显示名称 / 姓名</label>
+                    <input type="text" id="user-display" placeholder="如 张工 (运维)">
+                  </div>
+                  <div>
+                    <label for="user-role">权限角色</label>
+                    <select id="user-role" class="select-input">
+                      <option value="admin">admin — 系统管理员 (全部权限)</option>
+                      <option value="operator" selected>operator — 运维操作员 (证书与DNS读写)</option>
+                      <option value="viewer">viewer — 只读审计员 (仅查看，禁下载私钥)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="user-password">登录密码 <span id="user-pw-hint" class="muted small">(至少10位)</span></label>
+                    <input type="password" id="user-password" placeholder="至少 10 位字符">
+                  </div>
+                </div>
+                <div class="subpanel-actions">
+                  <label class="checkbox-inline" for="user-enabled">
+                    <input type="checkbox" id="user-enabled" checked>
+                    <span>启用该用户账号</span>
+                  </label>
+                  <div class="btn-row">
+                    <button type="button" id="user-form-cancel" class="btn btn-ghost btn-sm">取消</button>
+                    <button type="submit" class="btn btn-primary btn-sm">保存用户</button>
+                  </div>
+                </div>
+              </form>
+
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>用户名 / 名称</th>
+                      <th>角色权限</th>
+                      <th>状态</th>
+                      <th>最近登录时间 / IP</th>
+                      <th class="text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="users-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- 子面板 2: 证书拉取 API 令牌 (仅管理员可见) -->
+          <div id="sys-tokens" class="sys-panel" hidden>
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <h2>证书拉取 API 令牌 (Pull API)</h2>
+                  <p class="muted">为边缘与业务节点签发只读证书拉取令牌，严格校验全 SAN 授权范围并通过 <code>/api/v1/pull/certificates/{domain}</code> 同步证书。</p>
+                </div>
+                <button type="button" id="new-token-btn" class="btn btn-primary btn-sm">＋ 新增 API 令牌</button>
+              </div>
+
+              <form id="token-form" class="subpanel" hidden>
+                <h3 id="token-form-title">新增证书拉取 API 令牌</h3>
+                <input type="hidden" id="token-edit-id">
+                <div class="form-grid-2">
+                  <div>
+                    <label for="token-name">节点 / 令牌名称</label>
+                    <input type="text" id="token-name" maxlength="64" placeholder="如 edge-node-01 / cdn-hk" required>
+                  </div>
+                  <div>
+                    <label for="token-domains">允许拉取的域名范围 (逗号分隔，<code>*</code> 表示全部)</label>
+                    <input type="text" id="token-domains" value="example.com, *.example.com" placeholder="如 example.com, *.example.com 或 *">
+                  </div>
+                </div>
+                <div class="subpanel-actions">
+                  <span class="help-text">新建令牌后仅一次性显示明文 Bearer Token；编辑令牌不会轮换原密钥。</span>
+                  <div class="btn-row">
+                    <button type="button" id="token-form-cancel" class="btn btn-ghost btn-sm">取消</button>
+                    <button type="submit" id="token-submit-btn" class="btn btn-primary btn-sm">生成令牌</button>
+                  </div>
+                </div>
+              </form>
+
+              <div id="token-created-banner" class="subpanel token-banner" hidden></div>
+
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>节点名称 / 令牌前缀</th>
+                      <th>授权域名范围</th>
+                      <th>状态</th>
+                      <th>最近拉取时间 / IP</th>
+                      <th class="text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tokens-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- 子面板 3: 安全审计日志 (仅管理员可见) -->
+          <div id="sys-audit" class="sys-panel" hidden>
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <h2>安全操作审计日志</h2>
+                  <p class="muted">完整记录认证登录、证书签发与远程拉取、DNS 解析变更、云账户与令牌操作。</p>
+                </div>
+                <div class="filter-bar">
+                  <select id="audit-action-filter" class="select-input select-sm" aria-label="动作分类筛选">
+                    <option value="">全部动作分类</option>
+                    <option value="user.">用户与登录 (user.*)</option>
+                    <option value="cert.">证书与拉取 (cert.*)</option>
+                    <option value="dns.">DNS 解析 (dns.*)</option>
+                    <option value="account.">阿里云账户 (account.*)</option>
+                    <option value="token.">API 令牌 (token.*)</option>
+                    <option value="webhook.">Webhook 通知 (webhook.*)</option>
+                  </select>
+                  <input type="search" id="audit-keyword" class="search-input" placeholder="搜索用户、目标、详情或 IP…">
+                  <button type="button" id="refresh-audit-btn" class="btn btn-secondary btn-sm">刷新日志</button>
+                </div>
+              </div>
+
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>时间</th>
+                      <th>操作人 / IP</th>
+                      <th>动作</th>
+                      <th>操作对象</th>
+                      <th>详情</th>
+                    </tr>
+                  </thead>
+                  <tbody id="audit-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- 子面板 4: 个人密码与 Webhook 通知 -->
+          <div id="sys-profile" class="sys-panel" hidden>
+            <div class="profile-grid">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <h2>修改个人登录密码</h2>
+                    <p class="muted">更新当前登录账号的密码，新密码长度至少 10 位字符。</p>
+                  </div>
+                </div>
+                <form id="password-form" class="stack-form">
+                  <div>
+                    <label for="pw-current">当前密码</label>
+                    <input type="password" id="pw-current" autocomplete="current-password" required>
+                  </div>
+                  <div>
+                    <label for="pw-new">新密码 (至少 10 位)</label>
+                    <input type="password" id="pw-new" autocomplete="new-password" minlength="10" required>
+                  </div>
+                  <button type="submit" class="btn btn-primary btn-block">更新个人密码</button>
+                </form>
+              </div>
+
+              <div id="webhook-admin-card" class="card">
+                <div class="card-header">
+                  <div>
+                    <h2>Webhook 消息通知</h2>
+                    <p class="muted">证书签发或续期完成/异常时自动推送通知，兼容钉钉、飞书、企业微信、Slack 与通用 JSON Webhook。</p>
+                  </div>
+                </div>
+                <form id="webhook-form" class="stack-form">
+                  <div>
+                    <label for="webhook-url">Webhook URL</label>
+                    <input type="url" id="webhook-url" placeholder="https://oapi.dingtalk.com/robot/send?access_token=...">
+                    <p class="help-text">留空并保存可关闭通知推送；默认自动拦截内网与云元数据地址。</p>
+                  </div>
+                  <div class="btn-row">
+                    <button type="submit" class="btn btn-primary">保存 Webhook</button>
+                    <button type="button" id="test-webhook-btn" class="btn btn-secondary">发送测试通知</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- 全局浮动提示 -->
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- 全局模态框：证书详情 / 配置编辑 / 任务实时日志 -->
+  <div id="modal-backdrop" class="modal-backdrop" hidden>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header">
+        <h3 id="modal-title">详情</h3>
+        <button type="button" id="modal-close" class="btn btn-ghost btn-sm" aria-label="关闭弹窗">关闭 ✕</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/assets/app.js"></script>
+</body>
+</html>

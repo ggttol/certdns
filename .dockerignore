@@ -1,0 +1,9 @@
+data/
+.git/
+build/
+deploy/
+*.sqlite3*
+*.key
+.DS_Store
+.env
+.env.*

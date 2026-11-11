@@ -1,0 +1,37 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: certdns:latest
+    container_name: certdns-app
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      - TZ=Asia/Shanghai
+      - CERTDNS_DATA=/data
+      - CERTDNS_TLS_DIR=/data/tls
+      - CERTDNS_LISTEN=:9080
+      - CERTDNS_HOSTNAME=${CERTDNS_HOSTNAME:-cert.example.com}
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-Y", "off", "-qO-", "http://127.0.0.1:9080/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  nginx:
+    image: nginx:stable-alpine
+    container_name: certdns-nginx
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/nginx-entrypoint.sh:/usr/local/bin/nginx-entrypoint.sh:ro
+      - ./data/tls:/data/tls:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/nginx-entrypoint.sh"]

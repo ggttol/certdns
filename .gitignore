@@ -1,0 +1,8 @@
+/data/
+/build/
+/certdns
+*.sqlite3*
+*.key
+.DS_Store
+.env
+.env.*
